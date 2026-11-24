@@ -1,0 +1,53 @@
+# Publication du jeu sur GitHub Pages (branche gh-pages)
+#   push sur main             -> https://adrien426.github.io/Palmera/
+#   push sur une autre branche -> https://adrien426.github.io/Palmera/preview/<branche>/
+#   branche supprimée          -> sa preview est effacée
+# Réglage unique du dépôt : Settings → Pages → Deploy from a branch → gh-pages / (root)
+name: Pages
+
+on:
+  push:
+    branches-ignore: [gh-pages]
+  delete:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # écrire la branche gh-pages
+  pages: read       # vérifier le réglage de GitHub Pages
+
+concurrency:
+  group: pages-${{ github.event_name == 'delete' && 'delete' || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name != 'delete'
+    name: ${{ github.ref_name == github.event.repository.default_branch && 'Version principale' || 'Preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ github.ref_name == github.event.repository.default_branch && 'production' || 'preview' }}
+      url: ${{ steps.pages.outputs.url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Publier sur GitHub Pages
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 tools/pages.py deploy --branch "$GITHUB_REF_NAME" --sha "$GITHUB_SHA"
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    name: Nettoyage des previews
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Effacer les previews des branches supprimées
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 tools/pages.py prune
