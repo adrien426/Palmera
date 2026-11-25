@@ -286,7 +286,7 @@ const boomLight=new THREE.PointLight(0xffa040,0,60,2);scene.add(boomLight);
 const flashLight=new THREE.PointLight(0xffd080,0,14,2);scene.add(flashLight);
 let composer=null,gradePass=null,bloomPass=null,ssaoPass=null;
 function makeRT(w,h,samples){const rt=new THREE.WebGLRenderTarget(w,h,{type:THREE.HalfFloatType});rt.depthTexture=new THREE.DepthTexture(w,h);rt.depthTexture.type=THREE.UnsignedIntType;if(samples&&renderer.capabilities.isWebGL2)rt.samples=samples;return rt;}
-function setupPost(){if(composer){composer.renderTarget1.dispose();composer.renderTarget2.dispose();if(ssaoPass)ssaoPass.dispose();composer=null;gradePass=null;bloomPass=null;ssaoPass=null;}
+function setupPost(){if(composer){composer.renderTarget1.dispose();composer.renderTarget2.dispose();if(ssaoPass)ssaoPass.dispose();if(bloomPass&&bloomPass.dispose)bloomPass.dispose();if(gradePass){if(gradePass.material)gradePass.material.dispose();if(gradePass.fsQuad&&gradePass.fsQuad.dispose)gradePass.fsQuad.dispose();}composer=null;gradePass=null;bloomPass=null;ssaoPass=null;}
   renderer.toneMapping=THREE.ACESFilmicToneMapping;const R=RP();
   if(!R.post||!THREE.EffectComposer||!THREE.UnrealBloomPass)return;
   try{const w=innerWidth,h=innerHeight;const ms=perf.noMSAA?0:(perf.msaa>=0?perf.msaa:R.msaa);composer=new THREE.EffectComposer(renderer,makeRT(w,h,ms));
