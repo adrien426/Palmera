@@ -225,9 +225,9 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--night);color:var
     <div class="row">
       <button class="btn" id="play" disabled>JOUER</button><button class="btn2" id="newGame" type="button">Nouvelle partie</button>
     </div>
-    <div class="real" role="group" aria-label="Réalisme"><span>Réalisme</span><button type="button" data-real="faible" aria-pressed="false">Faible</button><button type="button" data-real="moyen" aria-pressed="false">Moyen</button><button type="button" data-real="max" aria-pressed="true">Max</button></div>
+    <div class="real" role="group" aria-label="Réalisme"><span>Réalisme</span><button type="button" data-real="faible" aria-pressed="false">Faible</button><button type="button" data-real="moyen" aria-pressed="false">Moyen</button><button type="button" data-real="max" aria-pressed="true">Max ∞</button></div>
     <div id="realDesc"></div>
-    <div class="real" role="group" aria-label="Images par seconde"><span>Images/s</span><button type="button" data-fps="30" aria-pressed="false">30</button><button type="button" data-fps="60" aria-pressed="false">60</button><button type="button" data-fps="120" aria-pressed="false">120</button><button type="button" data-fps="240" aria-pressed="false">240</button><button type="button" data-fps="0" aria-pressed="true">Max</button></div>
+    <div class="real" role="group" aria-label="Images par seconde"><span>Images/s</span><button type="button" data-fps="30" aria-pressed="false">30</button><button type="button" data-fps="60" aria-pressed="false">60</button><button type="button" data-fps="120" aria-pressed="false">120</button><button type="button" data-fps="240" aria-pressed="false">240</button><button type="button" data-fps="0" aria-pressed="true">Max ∞</button></div>
     <div id="fpsDesc"></div>
     <div class="note">Univers original inspiré des jeux en monde ouvert. Personnages, animations, voitures, motos, hélicoptère, armes, chiens et palmiers : modèles 3D de Néo Cité (animaux et arbres Quaternius, CC0). Ballon et buts sur la plage. Aucune donnée personnelle n’est collectée.</div>
   </div>
@@ -261,7 +261,10 @@ const spick=a=>a[(srand()*a.length)|0];
 
 /* ================= RENDERER ================= */
 const canvas=$('c');
-const renderer=new THREE.WebGLRenderer({canvas,antialias:!IS_TOUCH,powerPreference:'high-performance'});
+// l'anticrénelage du canevas ne sert qu'au réglage Faible (sans post-traitement) : en Moyen et Max, l'image passe par le post-traitement
+// qui a son propre anticrénelage ; le garder coûterait de la mémoire vidéo et de la bande passante à chaque image (énorme en suréchantillonnage)
+const CANVAS_AA=(()=>{try{return localStorage.getItem('palmera-real')==='faible';}catch(e){return false;}})();
+const renderer=new THREE.WebGLRenderer({canvas,antialias:!IS_TOUCH&&CANVAS_AA,powerPreference:'high-performance'});
 renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.shadowMap.autoUpdate=false;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
 renderer.outputEncoding=THREE.sRGBEncoding;
@@ -282,10 +285,10 @@ function makeRT(w,h,samples){const rt=new THREE.WebGLRenderTarget(w,h,{type:THRE
 function setupPost(){if(composer){composer.renderTarget1.dispose();composer.renderTarget2.dispose();if(ssaoPass)ssaoPass.dispose();composer=null;gradePass=null;bloomPass=null;ssaoPass=null;}
   renderer.toneMapping=THREE.ACESFilmicToneMapping;const R=RP();
   if(!R.post||!THREE.EffectComposer||!THREE.UnrealBloomPass)return;
-  try{const w=innerWidth,h=innerHeight;composer=new THREE.EffectComposer(renderer,makeRT(w,h,perf.noMSAA?0:R.msaa));
+  try{const w=innerWidth,h=innerHeight;const ms=perf.noMSAA?0:(perf.msaa>=0?perf.msaa:R.msaa);composer=new THREE.EffectComposer(renderer,makeRT(w,h,ms));
     composer.addPass(new THREE.RenderPass(scene,camera));
     // occlusion ambiante rapide calculée depuis la profondeur (pas de second rendu de la scène)
-    if(R.ssao&&!perf.noAO){ssaoPass=new FastAOPass(RL==='max'?12:8);composer.addPass(ssaoPass);}
+    if(R.ssao&&!perf.noAO){ssaoPass=new FastAOPass(RL==='max'?16:8);composer.addPass(ssaoPass);}
     bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(w,h),.42,.45,1.05);{const bs=bloomPass.setSize.bind(bloomPass);bloomPass.setSize=(a,b)=>bs(Math.max(2,a>>1),Math.max(2,b>>1));bloomPass.setSize(w,h);}composer.addPass(bloomPass);
     gradePass=new THREE.ShaderPass({uniforms:{tDiffuse:{value:null},exposure:{value:1.05},vig:{value:.32},fx:{value:0},px:{value:new THREE.Vector2(1/1920,1/1080)}},
       vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
@@ -295,12 +298,13 @@ function setupPost(){if(composer){composer.renderTarget1.dispose();composer.rend
       void main(){vec3 c=aces((fx>.5?fxaa(tDiffuse,vUv,px):texture2D(tDiffuse,vUv).rgb)*exposure);float l=dot(c,vec3(.299,.587,.114));
         c=mix(c,c*vec3(1.07,1.,.9),smoothstep(.35,1.,l));c=mix(c,c*vec3(.9,1.,1.1),1.-smoothstep(0.,.4,l));c=mix(vec3(l),c,1.15);
         c=pow(clamp(c,0.,1.),vec3(1./2.2));vec2 d=vUv-.5;c*=1.-dot(d,d)*vig*1.7;gl_FragColor=vec4(c,1.);}`});
-    gradePass.uniforms.fx.value=(perf.noMSAA||!R.msaa)?1:0;composer.addPass(gradePass);renderer.toneMapping=THREE.NoToneMapping;
+    gradePass.uniforms.fx.value=ms?0:1;composer.addPass(gradePass);renderer.toneMapping=THREE.NoToneMapping;
   }catch(e){console.warn('post',e);composer=null;ssaoPass=null;renderer.toneMapping=THREE.ACESFilmicToneMapping;}}
 function draw(){if(composer){if(gradePass){const pr=renderer.getPixelRatio();gradePass.uniforms.px.value.set(1/(innerWidth*pr),1/(innerHeight*pr));}composer.render();}else renderer.render(scene,camera);}
 const headLight=new THREE.SpotLight(0xfff2d8,0,70,0.55,0.5,1.2);scene.add(headLight,headLight.target);
 function applyQuality(){const R=RP();
   renderer.setPixelRatio(Math.min(devicePixelRatio,R.pr)*perf.scale);
+  const an=ANISO_CUR=RL==='max'?ANISO_MAX:ANISO;for(const t of TEXS)if(t.anisotropy!==an){t.anisotropy=an;t.needsUpdate=true;}
   const shs=Math.max(512,R.shadow/(perf.shDiv||1));sun.shadow.mapSize.set(shs,shs);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}
   const st=R.soft?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;if(renderer.shadowMap.type!==st){renderer.shadowMap.type=st;scene.traverse(o=>{if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{m.needsUpdate=true;});});}
   camera.far=R.far;camera.updateProjectionMatrix();for(const c of cars)setCarLOD(c);
@@ -310,8 +314,8 @@ function applyQuality(){const R=RP();
 
 /* ================= TEXTURES ================= */
 function cnv(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
-const ANISO=Math.min(8,renderer.capabilities.getMaxAnisotropy());
-function tex(c,srgb=true){const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;if(srgb)t.encoding=THREE.sRGBEncoding;t.anisotropy=ANISO;return t;}
+const ANISO=Math.min(8,renderer.capabilities.getMaxAnisotropy()),ANISO_MAX=renderer.capabilities.getMaxAnisotropy(),TEXS=[];let ANISO_CUR=ANISO;
+function tex(c,srgb=true){const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;if(srgb)t.encoding=THREE.sRGBEncoding;t.anisotropy=ANISO_CUR;TEXS.push(t);return t;}
 function noiseFill(g,w,h,amt){const id=g.getImageData(0,0,w,h),d=id.data;for(let i=0;i<d.length;i+=4){const n=(Math.random()-.5)*amt;d[i]+=n;d[i+1]+=n;d[i+2]+=n;}g.putImageData(id,0,0);}
 
 function facadeTex(style){
@@ -1296,6 +1300,8 @@ function aiCar(c,dt){
     for(let i=0;i<n;i++){const s=i%2?1:-1;carAxes(c);const x=c.pos.x+_r.x*s*(c.hw+.8)+_f.x*(i>1?-1.5:.5),z=c.pos.z+_r.z*s*(c.hw+.8)+_f.z*(i>1?-1.5:.5);if(!inBuilding(x,z,.3)){const p=spawnPed(x,z,kind);p.homeCar=c;}}
     if(wanted.level>=3&&MODELS.animals.Husky&&dogs.filter(d=>d.k9&&!d.dead).length<3&&Math.random()<.6){carAxes(c);const x=c.pos.x-_r.x*(c.hw+1.4),z=c.pos.z-_r.z*(c.hw+1.4);if(!inBuilding(x,z,.3)){const d=makeDog('Husky',x,z);if(d){d.k9=true;radio('Unité cynophile déployée.');}}}}
 }
+// animations des passants : chaque image de près, une sur deux entre 40 et 80 m (si le jeu tourne vite), une sur quatre au-delà ; décalées d'un passant à l'autre pour lisser
+function animK(p){if(p.aph===undefined)p.aph=Math.random()*12|0;const d2=camera.position.distanceToSquared(p.pos);return d2>6400?4:d2>1600&&perf.fps>50?2:1;}
 function updatePed(p,dt){
   const H=p.h;
   if(p.state==='rag'&&H.rd){stepRagdoll(H.rd,dt);const q=H.rd.P[0];p.pos.set(q.x,groundY(q.x,q.z),q.z);if(H.rd.sleep){p.state='dead';bloodPool(p.pos.x,p.pos.z,p.pos.y);}return;}
@@ -1343,7 +1349,7 @@ function updatePed(p,dt){
   if(isWater(p.pos.x,p.pos.z)){p.pos.x-=p.vel.x*dt*1.5;p.pos.z-=p.vel.z*dt*1.5;if(p.state==='walk')p.dir*=-1;}
   const hs=Math.hypot(p.vel.x,p.vel.z);
   const face=aim?Math.atan2(dx,dz):hs>.3?Math.atan2(p.vel.x,p.vel.z):p.yaw;p.yaw+=wrapA(face-p.yaw)*Math.min(1,dt*10);
-  H.g.position.copy(p.pos);H.g.rotation.set(0,p.yaw,0);const far=camera.position.distanceToSquared(p.pos)>6400;if(!far||frame%4===0){animHuman(H,hs,far?dt*4:dt,aim,false,aim?_aimD.set(dx,0,dz).normalize():null);if(p.kind==='civ')lifePose(p,far);}}
+  H.g.position.copy(p.pos);H.g.rotation.set(0,p.yaw,0);const k=animK(p);if(k===1||(frame+p.aph)%k===0){animHuman(H,hs,dt*k,aim,false,aim?_aimD.set(dx,0,dz).normalize():null);if(p.kind==='civ')lifePose(p,k>2);}}
 function copShoot(p,d){if(player.dead)return;const lvl=wanted.level;const P=playerPos();
   const muzzle=new THREE.Vector3();p.h.P.gun.getWorldPosition(muzzle);
   const moving=(player.car?Math.abs(player.car.vf):Math.hypot(player.vel.x,player.vel.z))>4;
@@ -1685,22 +1691,22 @@ function drawMap(){const W=360,R=180,P=playerPos();const spd=player.car?Math.abs
   drawOverlays(mctx,z,false);mctx.restore();
   mctx.strokeStyle='rgba(0,0,0,.5)';mctx.lineWidth=6;mctx.beginPath();mctx.arc(R,R,R-3,0,7);mctx.stroke();}
 // performance : qualité automatique pour rester au-dessus de 30 i/s
-const perf={acc:0,n:0,fps:60,scale:1,slow:0,density:1,noPost:false,logic:0,auto:location.hash!=='#nopf'};
+const perf={acc:0,n:0,fps:60,scale:1,msaa:-1,slow:0,density:1,noPost:false,logic:0,auto:location.hash!=='#nopf'};
 function perfTick(rdt){perf.acc+=rdt;perf.n++;if(perf.acc<1)return;perf.fps=perf.n/perf.acc;perf.acc=0;perf.n=0;
-  const e=$('fpsv');if(e)e.textContent=Math.round(perf.fps)+' i/s'+(GOV.lvl?' · qualité auto':'');if(!perf.auto||!running||paused)return;
-  govTick(perf.fps);
+  const e=$('fpsv');if(e)e.textContent=RL==='max'?'MAX ∞ · '+Math.round(perf.fps)+' i/s · '+Math.round(innerHeight*renderer.getPixelRatio())+'p':Math.round(perf.fps)+' i/s'+(GOV.lvl?' · qualité auto':'');if(!perf.auto||!running||paused)return;
+  if(RL==='max')maxTick(perf.fps);else govTick(perf.fps);
 }
 
 /* ================= RÉALISME : FAIBLE / MOYEN / MAX ================= */
 const REAL={
   faible:{pr:1,msaa:0,post:false,ssao:false,shadow:1024,soft:false,trees:0,carHi:0,density:.6,fog:1.7,far:760,pools:false,dents:true,rag:4,radar:'all',shR:60},
   moyen:{pr:1.5,msaa:0,post:true,ssao:true,shadow:2048,soft:true,trees:95,carHi:22,density:.85,fog:1.2,far:1100,pools:true,dents:true,rag:8,radar:'seen',shR:80},
-  max:{pr:2,msaa:4,post:true,ssao:true,shadow:4096,soft:true,trees:220,carHi:55,density:1.25,fog:.85,far:1800,pools:true,dents:true,rag:18,radar:'none',shR:110}};
-const REAL_DESC={faible:'Le plus fluide : effets réduits, moins de passants, carrosseries qui se froissent. La police est visible sur la carte.',moyen:'Équilibré : occlusion ambiante, halo lumineux, ombres douces, palmiers 3D, anticrénelage rapide. Sur la carte, seulement les policiers que tu vois.',max:'Tout à fond : anticrénelage 4×, ombres 4K, occlusion ambiante, physique plus fine, plus de voitures et de passants, vue lointaine. La qualité s’ajuste toute seule pour garder 60 images/s. Aucune police sur la carte.'};
+  max:{pr:2,msaa:4,post:true,ssao:true,shadow:4096,soft:true,trees:300,carHi:80,density:1.35,fog:.72,far:2200,pools:true,dents:true,rag:22,radar:'none',shR:110}};
+const REAL_DESC={faible:'Le plus fluide : effets réduits, moins de passants, carrosseries qui se froissent. La police est visible sur la carte.',moyen:'Équilibré : occlusion ambiante, halo lumineux, ombres douces, palmiers 3D, anticrénelage rapide. Sur la carte, seulement les policiers que tu vois.',max:'Max ∞ : tout au maximum que ta machine peut donner. Les effets ne baissent jamais (anticrénelage, ombres 4K, occlusion ambiante, filtrage 16×, vue lointaine, foule et trafic denses, physique fine) et les images/s n’ont pas de limite. Quand ta carte graphique a de la marge, l’image est calculée en plus grand que ton écran (jusqu’à 2×, comme de la 4K) puis réduite : encore plus nette. Aucune police sur la carte.'};
 let RL='max';try{const v=localStorage.getItem('palmera-real');if(v&&REAL[v])RL=v;}catch(e){}
 function RP(){return REAL[RL];}
 function setCarLOD(c){if(c.lod&&c.lod.levels.length>1)c.lod.levels[1].distance=RP().carHi;}
-function setRealism(k){if(!REAL[k])return;RL=k;try{localStorage.setItem('palmera-real',k);}catch(e){}if(k==='max'&&FPS.cap)setFps(0);GOV.lvl=0;GOV.key='';perf.scale=1;perf.noAO=perf.noMSAA=false;perf.shDiv=perf.shEvery=perf.crowd=1;applyQuality();updateRealUI();treeT=0;}
+function setRealism(k){if(!REAL[k])return;RL=k;try{localStorage.setItem('palmera-real',k);}catch(e){}if(k==='max'&&FPS.cap)setFps(0);GOV.lvl=0;GOV.key='';maxReset();perf.scale=1;perf.msaa=-1;perf.noAO=perf.noMSAA=false;perf.shDiv=perf.shEvery=perf.crowd=1;applyQuality();updateRealUI();treeT=0;}
 function updateRealUI(){document.querySelectorAll('[data-real]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.real===RL?'true':'false'));const d=$('realDesc');if(d)d.textContent=REAL_DESC[RL];}
 function radarSees(x,z,kind){const m=RP().radar;if(m==='none')return false;if(m==='all')return true;const P=playerPos(),d=Math.hypot(x-P.x,z-P.z);if(m==='near')return d<130;if(kind==='heli')return d<170;return d<95&&los(P.x,P.z,x,z,1.6);}
 document.querySelectorAll('[data-real]').forEach(b=>b.addEventListener('click',()=>{setRealism(b.dataset.real);sfx('click');}));
@@ -1961,11 +1967,11 @@ function policeEnRoute(){if(wanted.level===0||wanted.seen||wanted.spawnT<=0)retu
 const FPS={cap:0,next:0};try{const v=localStorage.getItem('palmera-fps');if(['30','60','120','240','0'].includes(v))FPS.cap=+v;}catch(e){}
 // fréquence de l'écran (60, 120, 144, 240 Hz…) : le navigateur ne peut pas afficher plus d'images que l'écran
 const HZ={v:60};(()=>{let t0=0,n=0;const a=[];const f=t=>{if(t0)a.push(t-t0);t0=t;if(++n<45)requestAnimationFrame(f);else{a.sort((x,y)=>x-y);const m=a[a.length>>1];if(m>0)HZ.v=Math.round(1000/m);if(typeof updateFpsUI==='function')updateFpsUI();}};requestAnimationFrame(f);})();
-const FPS_DESC={30:'30 images/s : stable et économe (batterie, PC modeste).',60:'60 images/s : fluide, comme sur console.',120:'120 images/s : très fluide (écran 120 Hz ou plus).',240:'240 images/s : pour les écrans 240 Hz et les grosses cartes graphiques. La qualité baisse toute seule si besoin.',0:'Sans limite : autant d’images que ton écran affiche (60, 144, 240, 360 Hz…).'};
+const FPS_DESC={30:'30 images/s : stable et économe (batterie, PC modeste).',60:'60 images/s : fluide, comme sur console.',120:'120 images/s : très fluide (écran 120 Hz ou plus).',240:'240 images/s : pour les écrans 240 Hz et les grosses cartes graphiques. La qualité baisse toute seule si besoin.',0:'Max ∞ : aucune limite d’images/s (autant que ton écran peut en afficher : 60, 144, 240, 360 Hz…) et tous les graphismes au maximum.'};
 function fpsSkip(){if(!FPS.cap)return false;const now=performance.now(),step=1000/FPS.cap;if(now<FPS.next-1)return true;FPS.next=now-FPS.next>step?now+step:FPS.next+step;return false;}
 function setFps(v){FPS.cap=v;FPS.next=0;try{localStorage.setItem('palmera-fps',String(v));}catch(e){}updateFpsUI();}
 function updateFpsUI(){document.querySelectorAll('[data-fps]').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.fps===FPS.cap?'true':'false'));const d=$('fpsDesc');if(d)d.textContent=FPS_DESC[FPS.cap]+' Ton écran : '+HZ.v+' Hz.';}
-document.querySelectorAll('[data-fps]').forEach(b=>b.addEventListener('click',()=>{setFps(+b.dataset.fps);sfx('click');}));
+document.querySelectorAll('[data-fps]').forEach(b=>b.addEventListener('click',()=>{const v=+b.dataset.fps;setFps(v);if(v===0&&RL!=='max')setRealism('max');sfx('click');}));
 updateFpsUI();
 /* ================= DÉGÂTS RÉALISTES : moteur, vitres, phares, pneus, débris ================= */
 headM.side=THREE.DoubleSide;tailM.side=THREE.DoubleSide;
@@ -2115,7 +2121,7 @@ function updateHydrants(dt){if(!HYD.im)return;
 function charBounds(sc,H){sc.updateMatrixWorld(true);sc.traverse(o=>{if(!o.isMesh||!o.geometry)return;o.geometry.computeBoundingSphere();const bs=o.geometry.boundingSphere,s=o.matrixWorld.getMaxScaleOnAxis()||1;bs.radius=Math.max(bs.radius*1.3,2.5*H/1.78/s);});}
 function setCull(h,on){if(h&&h.root)h.root.traverse(o=>{if(o.isMesh)o.frustumCulled=on;});}
 // ombres portées seulement à proximité, ombre douce au sol au-delà ; roues détaillées remplacées par des roues simples au loin (un seul appel de dessin)
-const SHD={faible:[30,18,30],moyen:[50,30,45],max:[70,45,70]};
+const SHD={faible:[30,18,30],moyen:[50,30,45],max:[85,55,85]};
 const BOOST={t:0,wheelIM:null,blobIM:null};const _bm=new THREE.Matrix4(),_bq=new THREE.Quaternion(),_bv=new THREE.Vector3(),_bs=new THREE.Vector3();
 function setCastShadow(o,on){o.traverse(m=>{if(m.isMesh)m.castShadow=on;});}
 function initBoost(){const wg=new THREE.CylinderGeometry(1,1,1,14).rotateZ(Math.PI/2);
@@ -2181,6 +2187,39 @@ function govTick(fps){const tgt=Math.min(FPS.cap||60,HZ.v>=50?HZ.v:60),now=perfo
   if(GOV.low>=2&&GOV.lvl<GOV.max){GOV.fails[GOV.lvl]=(GOV.fails[GOV.lvl]||0)+(GOV.justUp?1:0);GOV.justUp=false;GOV.lvl++;GOV.low=0;GOV.block=now+12000*(1+(GOV.fails[GOV.lvl-1]||0));govApply();}
   else if(GOV.high>=5&&GOV.lvl>0&&now>GOV.block){GOV.lvl--;GOV.high=0;GOV.justUp=true;govApply();}
   else if(GOV.justUp&&GOV.high>=8)GOV.justUp=false;}
+// MAX ∞ : tous les effets restent au maximum ; seule la définition calculée s'ajuste.
+//  - en dessous de celle de l'écran seulement si ça fait vraiment gagner des images/s (jamais sous 1 pixel par pixel CSS) ;
+//  - au-dessus (suréchantillonnage : image calculée plus grande puis réduite) dès que la carte graphique a de la marge.
+// Chaque changement est vérifié : s'il fait perdre des images/s (ou n'en fait pas gagner), on revient en arrière.
+const MAXQ={st:null,lvl:-1,low:0,high:0,stable:0,upBlock:0,cpuT:0,cpuN:0,fails:{},probe:null};
+function maxSteps(){const R=RP(),base=Math.min(devicePixelRatio||1,R.pr),px=Math.max(1,innerWidth*innerHeight);
+  const floor=Math.min(base,Math.max(1,base*.6)),ceil=Math.max(base,Math.min(base*2,3,Math.sqrt(8.3e6/px))),s=[];
+  for(const k of[.6,.7,.8,.9])if(base*k>=floor-1e-6)s.push({pr:base*k,ms:R.msaa});
+  const b=s.length;s.push({pr:base,ms:R.msaa});
+  // au-dessus de l'écran, le suréchantillonnage lisse déjà les bords : moins d'échantillons MSAA, mémoire vidéo jamais au-dessus du réglage de base
+  for(const k of[1.25,1.5,1.75,2])if(base*k<=ceil+1e-6)s.push({pr:base*k,ms:k<1.4?Math.min(2,R.msaa):0});
+  return{s,b,px:innerWidth*innerHeight};}
+function maxReset(){MAXQ.st=null;MAXQ.lvl=-1;MAXQ.low=MAXQ.high=MAXQ.stable=0;MAXQ.upBlock=MAXQ.cpuT=MAXQ.cpuN=0;MAXQ.fails={};MAXQ.probe=null;}
+function maxApply(){const st=MAXQ.st=maxSteps();if(MAXQ.lvl<0)MAXQ.lvl=st.b;MAXQ.lvl=Math.max(0,Math.min(st.s.length-1,MAXQ.lvl));MAXQ.stable=0;
+  const R=RP(),q=st.s[MAXQ.lvl],base=Math.min(devicePixelRatio||1,R.pr),sc=q.pr/base,eff=perf.noMSAA?0:(perf.msaa>=0?perf.msaa:R.msaa);
+  perf.noAO=perf.noMSAA=false;perf.shDiv=perf.shEvery=perf.crowd=1;GOV.key='max|'+q.ms;
+  const msChange=q.ms!==eff;perf.msaa=q.ms;
+  // seulement la définition (et l'anticrénelage du rendu) : ombres, textures et matériaux restent tels quels
+  if(msChange||Math.abs(sc-perf.scale)>1e-6){perf.scale=sc;renderer.setPixelRatio(q.pr);if(msChange)setupPost();resize();}}
+function maxTick(fps){const now=performance.now();if(!MAXQ.st||MAXQ.st.px!==innerWidth*innerHeight)maxApply();
+  const n=MAXQ.st.s.length,hz=HZ.v>=50?HZ.v:60,tgt=FPS.cap?Math.min(FPS.cap,hz):hz,P=MAXQ.probe;MAXQ.stable++;
+  if(P){if(now<P.from)return;
+    if(P.up){if(fps<Math.min(P.fps,tgt)*.97){const f=MAXQ.fails[MAXQ.lvl]=(MAXQ.fails[MAXQ.lvl]||0)+1;MAXQ.upBlock=now+15000*Math.pow(2,Math.min(6,f-1));MAXQ.lvl--;MAXQ.probe=null;maxApply();}
+      else if(now>=P.to)MAXQ.probe=null;return;}
+    // baisser n'a rien fait gagner : c'est le processeur qui limite, la définition n'y change rien → on remet la plus nette
+    if(now>=P.to){MAXQ.probe=null;if(fps<P.fps*1.04){MAXQ.cpuN++;MAXQ.cpuT=now+30000*Math.pow(2,Math.min(5,MAXQ.cpuN-1));MAXQ.lvl=P.from0;maxApply();}}return;}
+  // sous 93 % de la cible, l'écran saute des images (saccades) : on descend, deux paliers d'un coup si on est très loin
+  if(fps<tgt*.93){MAXQ.low++;MAXQ.high=0;}else if(fps>=tgt*.96){MAXQ.high++;MAXQ.low=0;}else{MAXQ.low=MAXQ.high=0;}
+  const cpu=now<MAXQ.cpuT;
+  if(MAXQ.low>=2&&MAXQ.lvl>0&&!cpu){const l0=MAXQ.lvl;MAXQ.lvl=Math.max(0,l0-(fps<tgt*.7?2:1));MAXQ.low=0;MAXQ.probe={up:false,fps,from0:l0,from:now+1500,to:now+3500};maxApply();return;}
+  // essai « à l'aveugle » (sous la cible sans pouvoir descendre) : au plus 3 échecs par palier
+  const room=MAXQ.high>=4,stuck=MAXQ.stable>=8&&fps<tgt*.96&&(cpu||MAXQ.lvl===0)&&(MAXQ.fails[MAXQ.lvl+1]||0)<3;
+  if((room||stuck)&&MAXQ.lvl<n-1&&now>MAXQ.upBlock){MAXQ.high=0;MAXQ.lvl++;MAXQ.probe={up:true,fps,from:now+1500,to:now+4500};maxApply();}}
 // anticrénelage FXAA quand le MSAA est coupé (réglage Moyen ou qualité adaptée)
 const FXAA_GLSL=`vec3 fxaa(sampler2D t,vec2 uv,vec2 px){vec3 L=vec3(.299,.587,.114);
   vec3 nw=texture2D(t,uv+vec2(-1.,-1.)*px).rgb,ne=texture2D(t,uv+vec2(1.,-1.)*px).rgb,sw=texture2D(t,uv+vec2(-1.,1.)*px).rgb,se=texture2D(t,uv+vec2(1.,1.)*px).rgb,m=texture2D(t,uv).rgb;
@@ -2257,7 +2296,7 @@ function lifeUpdate(p,dt){const H=p.h,P=playerPos(),dd=Math.hypot(P.x-p.pos.x,P.
     H.g.position.copy(p.pos);H.g.rotation.set(0,p.yaw,0);animHuman(H,1.35,dt,false,false,null);lifePose(p,false);return true;}
   if(p.state==='stand'){p.stayT-=dt;if(p.stayT<=0){p.state='walk';if(p.spot)p.spot.p=null;p.spot=null;return false;}}
   p.vel.set(0,0,0);p.pos.y=groundY(p.pos.x,p.pos.z);H.g.position.set(p.pos.x,p.pos.y-(p.state==='sit'?.42:0),p.pos.z);H.g.rotation.set(0,p.yaw,0);
-  const far=camera.position.distanceToSquared(p.pos)>6400;if(!far||frame%4===0){animHuman(H,0,far?dt*4:dt,false,false,null);lifePose(p,far);}return true;}
+  const k=animK(p);if(k===1||(frame+p.aph)%k===0){animHuman(H,0,dt*k,false,false,null);lifePose(p,k>2);}return true;}
 const LIFE_N={faible:[4,2],moyen:[10,5],max:[18,9]};
 function seatPed(o,state){const q=spawnPed(o.x,o.z,'civ');q.state=state;q.spot=o;o.p=q;q.yaw=o.yaw;q.stayT=state==='stand'?rand(25,70):1e9;q.pos.set(o.x,groundY(o.x,o.z),o.z);q.h.g.position.copy(q.pos);q.h.g.rotation.set(0,o.yaw,0);return q;}
 function updateLife(dt){LIFE.t-=dt;if(LIFE.t>0||!MODELS.ready)return;LIFE.t=1;const P=playerPos(),N=LIFE_N[RL]||LIFE_N.max;
@@ -2599,7 +2638,7 @@ function updateHUD(){
   $('tEnter').textContent=c?(nearGarage()?'GARAGE':'DESCENDRE'):(LIFE2.door?'ENTRER':'MONTER');$('tJump').textContent=c?'FREIN':'SAUT';}
 
 /* ================= MAIN LOOP ================= */
-const clock=new THREE.Clock();let envT=0,mapT=0,hudT=0,frame=0,menuAng=0;
+const clock=new THREE.Clock();let envT=0,mapT=0,hudT=0,frame=0,menuAng=0,shT=0;
 function loop(){requestAnimationFrame(loop);if(fpsSkip())return;const raw=clock.getDelta();let rdt=Math.min(raw,.05);frame++;perfTick(raw);
   if(!running||paused){menuAng+=rdt*.05;const P=playerPos();camera.position.set(P.x+Math.cos(menuAng)*70,40,P.z+Math.sin(menuAng)*70);camera.lookAt(P.x,8,P.z);updateSky(rdt*.2);water.material.normalMap.offset.x+=rdt*.01;renderer.shadowMap.needsUpdate=true;draw();return;}
   if(BM.open){drawBigMap();return;}if(SHOPUI.open){draw();return;}const t0=performance.now();
@@ -2629,7 +2668,7 @@ function loop(){requestAnimationFrame(loop);if(fpsSkip())return;const raw=clock.
   envT-=rdt;if(envT<=0){envT=20;updateEnv();}
   audioUpdate();
   hudT-=rdt;if(hudT<=0){hudT=.1;updateHUD();}mapT-=rdt;if(mapT<=0){mapT=1/30;drawMap();}
-  if(frame%(({faible:3,moyen:2,max:1}[RL]||1)*(perf.shEvery||1))===0)renderer.shadowMap.needsUpdate=true;draw();}
+  if(RL==='max'){const tn=performance.now();if(tn-shT>=10.9){shT=tn;renderer.shadowMap.needsUpdate=true;}}else if(frame%(({faible:3,moyen:2}[RL]||1)*(perf.shEvery||1))===0)renderer.shadowMap.needsUpdate=true;draw();}
 function carCar(a,b){carAxes(a);const fa={x:_f.x,z:_f.z};carAxes(b);const fb={x:_f.x,z:_f.z};
   const oa=a.hl2-a.hw,ob=b.hl2-b.hw;let hit=false;
   for(const sa of[1,0,-1])for(const sb of[1,0,-1]){const ax=a.pos.x+fa.x*oa*sa,az=a.pos.z+fa.z*oa*sa,bx=b.pos.x+fb.x*ob*sb,bz=b.pos.z+fb.z*ob*sb;
@@ -2674,7 +2713,7 @@ function finishInit(){
   for(let i=0;i<18;i++)spawnTraffic();spawnCivPeds(30);
   $('play').disabled=false;
   $('load').textContent=MODELS.ready?'Ville prête · modèles 3D chargés.':'Ville prête (modèles 3D indisponibles hors connexion : version simplifiée).';
-  window.__cam=v=>{camPitch=v;};window.__dbg=()=>JSON.stringify({pitch:camPitch.toFixed(2),recoil:recoil.toFixed(2),pos:[player.pos.x.toFixed(1),player.pos.y.toFixed(2),player.pos.z.toFixed(1)],car:player.car?[player.car.pos.x.toFixed(1),player.car.y.toFixed(2),player.car.pos.z.toFixed(1)]:null,cam:[camera.position.x.toFixed(1),camera.position.y.toFixed(1),camera.position.z.toFixed(1)]});window.__camYaw=v=>{camYaw=v;};window.__dbgSet=(k,v)=>{if(k==='msaa'&&composer){composer.renderTarget1.samples=v;composer.renderTarget2.samples=v;composer.renderTarget1.dispose();composer.renderTarget2.dispose();}if(k==='shadow'){sun.shadow.mapSize.set(v,v);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}}if(k==='trees')treeIM.forEach(a=>a.forEach(im=>im.visible=!!v));if(k==='bloom'&&bloomPass)bloomPass.enabled=!!v;if(k==='shadows')renderer.shadowMap.enabled=!!v;if(k==='pr'){renderer.setPixelRatio(v);resize();}};window.__palmera={pickups,giveWeapon,stripWeapons,LIFE2,SHOPUI,openShop,closeShop,saveGame,loadGame,repairCar,repaintCar,breakWheel,LAMPS,ROLLW,startDelivery,HZ,tryInteract,nm:()=>nightMats,DRV,SEAT,seatFor,releaseDriver,assignDriver,CARL,WINU,STR,AMB,getPost:()=>({composer,ssao:ssaoPass,grade:gradePass}),colliders,dentCar,dentMesh,seatPed,GOV,govApply,LIFE,BOOST,DENTQ,updateDents,lifeUpdate,phonePose,noteLook,capturePortrait,currentLook,updateSuspectCard,breakGlass,breakLights,burstTyre,engOf,spawnDebris,HYD,DEB,FPS,PORT,zoneOf,cycleAccessories,ACC_CFG,radarSees,damageCar,updateCarPhysics,SHOP,policeEnRoute,updateAccessories,renderer,scene,camera,setWeather,WX,TL,isWater,placeBoat,onIsland,hitPed,explosion,get ssao(){return !!ssaoPass;},get post(){return !!composer;},setRealism,ragdolls,get RL(){return RL;},skidMesh,env,spawnPed,colliders,makeCarReal,addRider,dogs,makeCar,makeDog,makeHuman,treeIM,spawnRoadblock,crime,policeUnits,hurtPlayer,endGame,get state(){return state;},perf,roadblocks,openMap,get waypoint(){return waypoint;},player,wanted,cars,peds,helis,setLevel,startGame,MODELS,ball,get fps(){return frame;}};
+  window.__cam=v=>{camPitch=v;};window.__dbg=()=>JSON.stringify({pitch:camPitch.toFixed(2),recoil:recoil.toFixed(2),pos:[player.pos.x.toFixed(1),player.pos.y.toFixed(2),player.pos.z.toFixed(1)],car:player.car?[player.car.pos.x.toFixed(1),player.car.y.toFixed(2),player.car.pos.z.toFixed(1)]:null,cam:[camera.position.x.toFixed(1),camera.position.y.toFixed(1),camera.position.z.toFixed(1)]});window.__camYaw=v=>{camYaw=v;};window.__dbgSet=(k,v)=>{if(k==='msaa'&&composer){composer.renderTarget1.samples=v;composer.renderTarget2.samples=v;composer.renderTarget1.dispose();composer.renderTarget2.dispose();}if(k==='shadow'){sun.shadow.mapSize.set(v,v);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}}if(k==='trees')treeIM.forEach(a=>a.forEach(im=>im.visible=!!v));if(k==='bloom'&&bloomPass)bloomPass.enabled=!!v;if(k==='shadows')renderer.shadowMap.enabled=!!v;if(k==='pr'){renderer.setPixelRatio(v);resize();}};window.__palmera={MAXQ,maxTick,maxApply,maxSteps,setFps,FPS,TEXS,ANISO_MAX,pickups,giveWeapon,stripWeapons,LIFE2,SHOPUI,openShop,closeShop,saveGame,loadGame,repairCar,repaintCar,breakWheel,LAMPS,ROLLW,startDelivery,HZ,tryInteract,nm:()=>nightMats,DRV,SEAT,seatFor,releaseDriver,assignDriver,CARL,WINU,STR,AMB,getPost:()=>({composer,ssao:ssaoPass,grade:gradePass}),colliders,dentCar,dentMesh,seatPed,GOV,govApply,LIFE,BOOST,DENTQ,updateDents,lifeUpdate,phonePose,noteLook,capturePortrait,currentLook,updateSuspectCard,breakGlass,breakLights,burstTyre,engOf,spawnDebris,HYD,DEB,FPS,PORT,zoneOf,cycleAccessories,ACC_CFG,radarSees,damageCar,updateCarPhysics,SHOP,policeEnRoute,updateAccessories,renderer,scene,camera,setWeather,WX,TL,isWater,placeBoat,onIsland,hitPed,explosion,get ssao(){return !!ssaoPass;},get post(){return !!composer;},setRealism,ragdolls,get RL(){return RL;},skidMesh,env,spawnPed,colliders,makeCarReal,addRider,dogs,makeCar,makeDog,makeHuman,treeIM,spawnRoadblock,crime,policeUnits,hurtPlayer,endGame,get state(){return state;},perf,roadblocks,openMap,get waypoint(){return waypoint;},player,wanted,cars,peds,helis,setLevel,startGame,MODELS,ball,get fps(){return frame;}};
 }
 try{init();}catch(e){$('load').textContent='Erreur au chargement : '+e.message;console.error(e);}
 

@@ -28,6 +28,11 @@ modèles dans `assets/`. L'utilisateur parle français : réponses en français.
   1. `window.__ASSETS` (version hors ligne) ;
   2. `assets/<f>` ;
   3. `REMOTE` (le dossier `assets/` du site principal).
+- Qualité : `REAL` (faible / moyen / max) et `FPS` (30…240, 0 = sans limite). « Max ∞ » dans une ligne met tout au Max.
+  - En Max ∞, le régulateur `MAXQ` (`maxTick`) ne coupe jamais d'effet. Il ne change que la définition calculée
+    (`maxSteps()` : de 0,6× l'écran, sans descendre sous 1 pixel par pixel CSS, jusqu'au suréchantillonnage 2×).
+    Il vérifie chaque changement et revient en arrière si celui-ci fait perdre des images/s.
+  - En Faible et Moyen, `GOV` (`govTick`) baisse aussi les effets.
 - Les réglages et la sauvegarde sont dans le `localStorage` : `palmera-save`, `palmera-fps`, etc.
   Les previews et le site principal partagent la même origine, donc la même sauvegarde.
 - Points d'accès pour les tests : `window.__palmera` (`startGame`, `giveWeapon`, `cars`, `peds`, `player`, `setLevel`,
