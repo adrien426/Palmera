@@ -595,8 +595,8 @@ function cityEnvStep(dt){if(!RP().cityEnv||!composer){if(CITYENV.on){CITYENV.on=
     CITYENV.face=0;CITYENV.pos.copy(camera.position);CITYENV.cam.position.copy(camera.position);CITYENV.cam.updateMatrixWorld(true);}
   // ta voiture et ton personnage ne se reflètent pas sur eux-mêmes
   const i=CITYENV.face,pc=player.car&&player.car.g,pm=player.model&&player.model.g,v1=pc&&pc.visible,v2=pm&&pm.visible;if(pc)pc.visible=false;if(pm)pm.visible=false;
-  const au=scene.autoUpdate,tm=renderer.toneMapping,prev=renderer.getRenderTarget();scene.autoUpdate=false;renderer.toneMapping=THREE.NoToneMapping;
-  renderer.setRenderTarget(CITYENV.rt,i);renderer.render(scene,CITYENV.cam.children[i]);renderer.setRenderTarget(prev);renderer.toneMapping=tm;scene.autoUpdate=au;
+  const au=scene.matrixWorldAutoUpdate,tm=renderer.toneMapping,prev=renderer.getRenderTarget();scene.matrixWorldAutoUpdate=false;renderer.toneMapping=THREE.NoToneMapping;
+  renderer.setRenderTarget(CITYENV.rt,i);renderer.render(scene,CITYENV.cam.children[i]);renderer.setRenderTarget(prev);renderer.toneMapping=tm;scene.matrixWorldAutoUpdate=au;
   if(pc)pc.visible=v1;if(pm)pm.visible=v2;
   if(++CITYENV.face>=6){CITYENV.face=-1;CITYENV.t=1.5;CITYENV.n++;CITYENV.rt.texture.needsPMREMUpdate=true;if(scene.environment!==CITYENV.rt.texture)scene.environment=CITYENV.rt.texture;}}
 
