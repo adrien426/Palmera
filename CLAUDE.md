@@ -28,7 +28,13 @@ modèles dans `assets/`. L'utilisateur parle français : réponses en français.
   1. `window.__ASSETS` (version hors ligne) ;
   2. `assets/<f>` ;
   3. `REMOTE` (le dossier `assets/` du site principal).
-- Qualité : `REAL` (faible / moyen / max) et `FPS` (30…240, 0 = sans limite). « Max ∞ » dans une ligne met tout au Max.
+- Qualité : `REAL` (faible / moyen / base / max) et `FPS` (30…240, 0 = sans limite). « Max ∞ » dans une ligne met tout au Max.
+  - Base est la qualité de référence (l'ancien Max). Les tableaux par niveau (`SHD`, `LIFE_N`, `DRV`…) ont une entrée `base`.
+  - Max ∞ ajoute : reflets de la ville en temps réel (`CITYENV`, une face de cube par image), AO pleine définition,
+    une ville plus dense et une physique plus fine.
+- Accessoires d'armes : `OPTICS`, `MOD_FOR`, `MOD_INFO`, `PAINTS` et `player.mods[id]` (1 = monté, 2 = acheté mais retiré).
+  Voir aussi `zoomOf` (lunette), `magOf` (chargeur), `decorateGun` (pièces 3D), `updateGunMods` (laser, lampe),
+  `scopeUI` (réticule) et `modItems` (pages de l'armurerie).
   - En Max ∞, le régulateur `MAXQ` (`maxTick`) ne coupe jamais d'effet. Il ne change que la définition calculée
     (`maxSteps()` : de 0,6× l'écran, sans descendre sous 1 pixel par pixel CSS, jusqu'au suréchantillonnage 2×).
     Il vérifie chaque changement et revient en arrière si celui-ci fait perdre des images/s.
