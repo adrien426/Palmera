@@ -39,6 +39,12 @@ modèles dans `assets/`. L'utilisateur parle français : réponses en français.
     (`maxSteps()` : de 0,6× l'écran, sans descendre sous 1 pixel par pixel CSS, jusqu'au suréchantillonnage 2×).
     Il vérifie chaque changement et revient en arrière si celui-ci fait perdre des images/s.
   - En Faible et Moyen, `GOV` (`govTick`) baisse aussi les effets.
+- Intérieurs (section `INTÉRIEURS`) : chaque type de lieu (`INT_KINDS`) a sa pièce 3D, construite à la première visite
+  à x ≈ -5600 (`intRoom`, `INT_FURN[type]`).
+  - `enterInterior` / `exitInterior` font le fondu et le téléport. Pendant la visite, `player.inside` est défini et
+    `playerPos()` renvoie la porte, pour que la ville continue autour.
+  - `collideCircle` ne limite plus la carte au-delà de x = -4500. `intCam` garde la caméra dans la pièce.
+  - Braquage : viser le caissier (`updateInterior`). La police est prévenue à la sortie.
 - Les réglages et la sauvegarde sont dans le `localStorage` : `palmera-save`, `palmera-fps`, etc.
   Les previews et le site principal partagent la même origine, donc la même sauvegarde.
 - Points d'accès pour les tests : `window.__palmera` (`startGame`, `giveWeapon`, `cars`, `peds`, `player`, `setLevel`,
