@@ -292,19 +292,27 @@ function setupPost(){if(composer){composer.renderTarget1.dispose();composer.rend
   try{const w=innerWidth,h=innerHeight;const ms=perf.noMSAA?0:(perf.msaa>=0?perf.msaa:R.msaa);composer=new THREE.EffectComposer(renderer,makeRT(w,h,ms));
     composer.addPass(new THREE.RenderPass(scene,camera));
     // occlusion ambiante rapide calculée depuis la profondeur (pas de second rendu de la scène)
-    if(R.ssao&&!perf.noAO){ssaoPass=new FastAOPass(RL==='max'?16:RL==='base'?12:8,!!R.aoFull);composer.addPass(ssaoPass);}
+    if(R.ssao&&!perf.noAO){ssaoPass=new FastAOPass(RL==='max'?16:RL==='base'?12:8,!!R.aoFull,!!R.shafts);composer.addPass(ssaoPass);}
     bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(w,h),.42,.45,1.05);{const bs=bloomPass.setSize.bind(bloomPass);bloomPass.setSize=(a,b)=>bs(Math.max(2,a>>1),Math.max(2,b>>1));bloomPass.setSize(w,h);}composer.addPass(bloomPass);
-    gradePass=new THREE.ShaderPass({uniforms:{tDiffuse:{value:null},exposure:{value:1.05},vig:{value:.32},fx:{value:0},px:{value:new THREE.Vector2(1/1920,1/1080)}},
+    gradePass=new THREE.ShaderPass({uniforms:{tDiffuse:{value:null},exposure:{value:1.05},vig:{value:.32},fx:{value:0},spd:{value:0},px:{value:new THREE.Vector2(1/1920,1/1080)}},
       vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-      fragmentShader:`uniform sampler2D tDiffuse;uniform float exposure,vig,fx;uniform vec2 px;varying vec2 vUv;
+      fragmentShader:`uniform sampler2D tDiffuse;uniform float exposure,vig,fx,spd;uniform vec2 px;varying vec2 vUv;
       ${FXAA_GLSL}
       vec3 aces(vec3 x){x*=.6;return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.);}
-      void main(){vec3 c=aces((fx>.5?fxaa(tDiffuse,vUv,px):texture2D(tDiffuse,vUv).rgb)*exposure);float l=dot(c,vec3(.299,.587,.114));
+      void main(){vec3 c0=fx>.5?fxaa(tDiffuse,vUv,px):texture2D(tDiffuse,vUv).rgb;
+        if(spd>.01){vec2 dd=vUv-.5;float k=spd*smoothstep(.12,.75,length(dd))*.08;vec3 acc=c0;for(int i=1;i<8;i++)acc+=texture2D(tDiffuse,vUv-dd*k*float(i)/7.).rgb;c0=acc/8.;}
+        vec3 c=aces(c0*exposure);float l=dot(c,vec3(.299,.587,.114));
         c=mix(c,c*vec3(1.07,1.,.9),smoothstep(.35,1.,l));c=mix(c,c*vec3(.9,1.,1.1),1.-smoothstep(0.,.4,l));c=mix(vec3(l),c,1.15);
         c=pow(clamp(c,0.,1.),vec3(1./2.2));vec2 d=vUv-.5;c*=1.-dot(d,d)*vig*1.7;gl_FragColor=vec4(c,1.);}`});
     gradePass.uniforms.fx.value=ms?0:1;composer.addPass(gradePass);renderer.toneMapping=THREE.NoToneMapping;
   }catch(e){console.warn('post',e);composer=null;ssaoPass=null;renderer.toneMapping=THREE.ACESFilmicToneMapping;}}
-function draw(){if(composer){if(gradePass){const pr=renderer.getPixelRatio();gradePass.uniforms.px.value.set(1/(innerWidth*pr),1/(innerHeight*pr));}composer.render();}else renderer.render(scene,camera);}
+const _sunV=new THREE.Vector3();
+function postFx(){const R=RP();
+  if(gradePass){const c=player.car,v=c&&!c.dead&&R.speedBlur?Math.abs(c.vf):0,t=clamp((v-19.4)/30.6,0,1)*.9;gradePass.uniforms.spd.value=lerp(gradePass.uniforms.spd.value,t,.12);}
+  if(ssaoPass&&ssaoPass.shafts){const d=skyU.sunDir.value;_sunV.copy(d).normalize().multiplyScalar(800).add(camera.position).project(camera);
+    const u=_sunV.x*.5+.5,w=_sunV.y*.5+.5,off=Math.max(0,-u,u-1,-w,w-1),k=_sunV.z<1&&d.y>.02?(1-env.night)*(1-WX.cloud*.85)*Math.max(0,1-off*2.2):0;
+    ssaoPass.aoMat.uniforms.sunUV.value.set(u,w);ssaoPass.aoMat.uniforms.shaftK.value=k;ssaoPass.compMat.uniforms.shaftK.value=k*.55;ssaoPass.compMat.uniforms.sunCol.value.copy(skyU.sunCol.value);}}
+function draw(){if(composer){if(gradePass){const pr=renderer.getPixelRatio();gradePass.uniforms.px.value.set(1/(innerWidth*pr),1/(innerHeight*pr));}postFx();composer.render();}else renderer.render(scene,camera);}
 const headLight=new THREE.SpotLight(0xfff2d8,0,70,0.55,0.5,1.2);scene.add(headLight,headLight.target);
 function applyQuality(){const R=RP();
   renderer.setPixelRatio(Math.min(devicePixelRatio,R.pr)*perf.scale);
@@ -591,7 +599,9 @@ const CITYENV={rt:null,cam:null,face:-1,t:0,pos:new THREE.Vector3(1e9,0,0),on:fa
 function cityEnvStep(dt){if(!RP().cityEnv||!composer){if(CITYENV.on){CITYENV.on=false;CITYENV.face=-1;updateEnv();}return;}
   if(!CITYENV.rt){CITYENV.rt=new THREE.WebGLCubeRenderTarget(256,{type:THREE.HalfFloatType});CITYENV.cam=new THREE.CubeCamera(.5,450,CITYENV.rt);}
   if(!CITYENV.on){CITYENV.on=true;CITYENV.face=-1;CITYENV.t=0;}
-  if(CITYENV.face<0){CITYENV.t-=dt;if(CITYENV.t>0&&CITYENV.pos.distanceToSquared(camera.position)<100)return;
+  if(CITYENV.face<0){CITYENV.t-=dt;const m2=CITYENV.pos.distanceToSquared(camera.position);if(CITYENV.t>0&&m2<100)return;
+    // grand saut (réapparition, partie chargée) : reflets du ciel le temps de capturer le nouvel endroit
+    if(m2>2500&&envRT&&scene.environment===CITYENV.rt.texture)scene.environment=envRT.texture;
     CITYENV.face=0;CITYENV.pos.copy(camera.position);CITYENV.cam.position.copy(camera.position);CITYENV.cam.updateMatrixWorld(true);}
   // ta voiture et ton personnage ne se reflètent pas sur eux-mêmes
   const i=CITYENV.face,pc=player.car&&player.car.g,pm=player.model&&player.model.g,v1=pc&&pc.visible,v2=pm&&pm.visible;if(pc)pc.visible=false;if(pm)pm.visible=false;
@@ -1037,6 +1047,13 @@ function playOnce(h,name,lock){const a=h.acts&&h.acts[name];if(!a)return;const p
 function pointBone(b,dir){b.parent.getWorldQuaternion(_q1);_q2.setFromUnitVectors(_UP,dir);b.quaternion.copy(_q1.invert().multiply(_q2));}
 function ridePose(h){if(!h.real)return;if(!h.rideB){h.rideB=[];for(const n in RIDE){const bn=h.root.getObjectByName('mixamorig'+n);if(bn)h.rideB.push([bn,RIDE[n]]);}}
   for(const[bn,v]of h.rideB){bn.rotateX(v[0]);bn.rotateY(v[1]);bn.rotateZ(v[2]);}}
+// passants variés : taille, couleur des cheveux et, quand le modèle a des habits séparés, couleur du haut, du bas et des chaussures
+const PED_HAIR=[[.25,.2,.17],[.45,.3,.2],[1.55,1.25,.85],[.95,.45,.25],[1.2,1.2,1.2],[.12,.1,.1]],PED_CLOTH=[0x2b4c7e,0x8a1c1c,0xe8e4da,0x2f5d4a,0x1d1e22,0xc8a24a,0x7a2e5a,0x4a6a8a,0xd96b3a,0x6b6f75];
+function pedVariety(h,root){h.g.scale.setScalar(rand(.94,1.06));const hc=pick(PED_HAIR),tint=(m,f)=>{const c=m.clone();f(c.color);return c;};
+  root.traverse(o=>{if(!o.isMesh||!o.material)return;const one=m=>{const n=(m.name||'').toLowerCase();
+    if(/hair/.test(n))return tint(m,c=>c.setRGB(hc[0],hc[1],hc[2]));if(/top|bottom/.test(n)){const k=new THREE.Color(pick(PED_CLOTH));return tint(m,c=>c.setRGB(k.r*1.6,k.g*1.6,k.b*1.6));}
+    if(/shoe/.test(n)&&Math.random()<.6){const k=new THREE.Color(pick(PED_CLOTH));return tint(m,c=>c.setRGB(k.r*1.4,k.g*1.4,k.b*1.4));}return m;};
+    o.material=Array.isArray(o.material)?o.material.map(one):one(o.material);});}
 function makeHumanReal(kind,file){const list=(file?[file]:(CHAR_FILES[kind]||CHAR_FILES.civ)).filter(f=>MODELS.chars[f]);if(!list.length)return null;
   const M=MODELS.chars[pick(list)];const root=THREE.SkeletonUtils.clone(M.scene);root.scale.multiplyScalar(M.scale);
   const g=new THREE.Group();g.add(root);const mixer=new THREE.AnimationMixer(root),acts={};
@@ -1045,7 +1062,8 @@ function makeHumanReal(kind,file){const list=(file?[file]:(CHAR_FILES[kind]||CHA
   const B=n=>root.getObjectByName('mixamorig'+n);
   const bones={arm:B('RightArm'),fore:B('RightForeArm'),hand:B('RightHand'),larm:B('LeftArm'),lfore:B('LeftForeArm'),lhand:B('LeftHand')};
   const gun=new THREE.Group();g.add(gun);
-  const h={g,root,mixer,acts,cur:'idle',lock:0,bones,gun,gunId:null,real:true,phase:0,P:{gun,aR:new THREE.Object3D()}};
+  const h={g,root,mixer,acts,cur:'idle',lock:0,bones,gun,gunId:null,real:true,phase:0,P:{gun,aR:new THREE.Object3D()},head:B('Head'),neck:B('Neck')};
+  if(kind==='civ')pedVariety(h,root);
   if(kind==='cop')setGun(h,'pistol');else if(kind==='swat')setGun(h,'smg');else if(kind==='army')setGun(h,'rifle');
   gun.visible=kind!=='civ';h.nervous=kind!=='civ'&&kind!=='player';return h;}
 function setGun(h,id){if(h.gunId===id)return;h.gunId=id;while(h.gun.children.length)h.gun.remove(h.gun.children[0]);
@@ -1054,12 +1072,19 @@ function setGun(h,id){if(h.gunId===id)return;h.gunId=id;while(h.gun.children.len
   const W=WGUN[id],M=W&&MODELS.wpn[W[0]];
   if(!M){const t=new THREE.Mesh(HG.gun,smat(0x222222,{metalness:.6,roughness:.4}));h.gun.add(t);h.gunLen=.32;return;}
   const o=M.obj.clone();o.scale.setScalar(W[1]/M.len);h.gun.add(o);h.gunLen=W[1];if(h===player.model)decorateGun(h,id,o);}
+// regard : un passant proche tourne la tête (et un peu le cou) vers le joueur, en douceur et dans la limite du naturel
+const _lkq=new THREE.Quaternion(),_lkp=new THREE.Vector3(),_lkax=new THREE.Vector3(0,1,0),_lkbx=new THREE.Vector3(1,0,0);
+function headLook(h,dt,aim){if(h===player.model||!h.head)return;const P=playerPos(),g=h.g.position,dx=P.x-g.x,dz=P.z-g.z,d2=dx*dx+dz*dz;
+  let ty=0,tp=0;if(d2<64&&!aim&&!player.dead){const yaw=Math.atan2(dx,dz)-h.g.rotation.y,a=Math.atan2(Math.sin(yaw),Math.cos(yaw));if(Math.abs(a)<1.9){ty=clamp(a,-1.1,1.1);tp=clamp(Math.atan2((P.y+1.6)-(g.y+1.6),Math.sqrt(d2)),-.35,.35);}}
+  const k=Math.min(1,dt*4);h.lookY=(h.lookY||0)+(ty-(h.lookY||0))*k;h.lookP=(h.lookP||0)+(tp-(h.lookP||0))*k;if(Math.abs(h.lookY)<.01&&Math.abs(h.lookP)<.01)return;
+  _lkq.setFromAxisAngle(_lkax,h.lookY*.65);h.head.quaternion.multiply(_lkq);_lkq.setFromAxisAngle(_lkbx,-h.lookP);h.head.quaternion.multiply(_lkq);
+  if(h.neck){_lkq.setFromAxisAngle(_lkax,h.lookY*.35);h.neck.quaternion.multiply(_lkq);}}
 function animReal(h,speed,dt,aim,swim,aimDir){
   if(h.rd)return;if(h.lock>0)h.lock-=dt;
   else{const idleK=h.nervous&&h.acts.idleN?'idleN':'idle',want=speed<.35?idleK:speed<4.4?'walk':'run';
     if(h.cur!==want&&h.acts[want]){const a=h.acts[want],b=h.acts[h.cur];a.reset();a.setLoop(THREE.LoopRepeat,Infinity);a.play();if(b)a.crossFadeFrom(b,.25,false);h.cur=want;}}
   if(h.acts.walk)h.acts.walk.timeScale=clamp(speed/1.45,.6,2);if(h.acts.run)h.acts.run.timeScale=clamp(speed/5.8,.75,1.4);
-  h.mixer.update(dt);
+  h.mixer.update(dt);headLook(h,dt,aim);
   const B=h.bones;
   if(aim&&aimDir&&B.arm&&h.lock<=0){h.g.updateMatrixWorld(true);pointBone(B.arm,aimDir);if(B.fore)B.fore.quaternion.identity();if(B.hand)B.hand.quaternion.identity();
     if((h.gunLen||0)>.5&&B.larm&&B.hand){h.g.updateMatrixWorld(true);B.hand.getWorldPosition(_hw).addScaledVector(aimDir,h.gunLen*.45);_hw.y-=.04;B.larm.getWorldPosition(_gd);pointBone(B.larm,_gd.subVectors(_hw,_gd).normalize());if(B.lfore)B.lfore.quaternion.identity();}}
@@ -1810,7 +1835,7 @@ const REAL={
   faible:{pr:1,msaa:0,post:false,ssao:false,shadow:1024,soft:false,trees:0,carHi:0,density:.6,fog:1.7,far:760,pools:false,dents:true,rag:4,radar:'all',shR:60},
   moyen:{pr:1.5,msaa:0,post:true,ssao:true,shadow:2048,soft:true,trees:95,carHi:22,density:.85,fog:1.2,far:1100,pools:true,dents:true,rag:8,radar:'seen',shR:80},
   base:{pr:2,msaa:4,post:true,ssao:true,shadow:4096,soft:true,trees:220,carHi:55,density:1.25,fog:.85,far:1800,pools:true,dents:true,rag:18,radar:'none',shR:110},
-  max:{pr:2,msaa:4,post:true,ssao:true,shadow:4096,soft:true,trees:420,carHi:120,density:1.6,fog:.62,far:2600,pools:true,dents:true,rag:30,radar:'none',shR:120,aoFull:true,cityEnv:true}};
+  max:{pr:2,msaa:4,post:true,ssao:true,shadow:4096,soft:true,trees:420,carHi:120,density:1.6,fog:.62,far:2600,pools:true,dents:true,rag:30,radar:'none',shR:120,aoFull:true,cityEnv:true,shafts:true,speedBlur:true}};
 const REAL_DESC={faible:'Le plus fluide : effets réduits, moins de passants, carrosseries qui se froissent. La police est visible sur la carte.',moyen:'Équilibré : occlusion ambiante, halo lumineux, ombres douces, palmiers 3D, anticrénelage rapide. Sur la carte, seulement les policiers que tu vois.',base:'Base : la qualité de référence (anticrénelage 4×, ombres 4K, occlusion ambiante, reflets du ciel). Si ta machine peine, la qualité baisse un peu toute seule pour rester fluide. Aucune police sur la carte.',max:'Max ∞ : tout bien au-delà de Base. Reflets de la ville en temps réel sur les voitures, les vitres et la route mouillée, image plus fine que ton écran quand la carte graphique a de la marge, occlusion ambiante pleine définition, filtrage 16×, vue jusqu’à 2,6 km. Ville bien plus vivante (trafic, passants, terrasses), personnages animés en continu, physique plus fine. Les effets ne baissent jamais et les images/s n’ont pas de limite.'};
 let RL='base';try{const v=localStorage.getItem('palmera-real');if(v&&REAL[v])RL=v;}catch(e){}
 function RP(){return REAL[RL];}
@@ -2252,30 +2277,43 @@ function physStep(c,dt){const n=c.boat?1:RL==='max'?(c===player.car?3:camera.pos
 // occlusion ambiante calculée depuis la profondeur (demi-résolution) : plus de second rendu de toute la ville
 const AO_VS='varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}';
 const AO_FS=`uniform sampler2D tDepth;uniform mat4 projInv,proj;uniform vec2 res;uniform float radius,intensity,fadeFar;varying vec2 vUv;
+uniform vec2 sunUV;uniform float shaftK;
+// rayons de soleil : on remonte vers le soleil à l'écran et on compte le ciel visible (diffusion de la lumière dans l'air)
+float shafts(){
+#ifdef SHAFTS
+ if(shaftK<=0.)return 0.;vec2 asp=vec2(res.x/res.y,1.),dv=vUv-sunUV;float L=length(dv*asp);if(L>.75)return 0.;
+ // on remonte vers le soleil (au plus 0,45 d'écran) : le ciel autour de son disque éclaire, ce qui le cache (immeubles, palmiers, personnages) découpe des rayons
+ vec2 d=dv*(min(1.,.45/max(L,1e-4))/24.),uv=vUv;float acc=0.,dec=1.;
+ for(int i=0;i<24;i++){uv-=d;vec2 q=step(vec2(0.),uv)*step(uv,vec2(1.));float r=length((uv-sunUV)*asp);acc+=step(.99999,texture2D(tDepth,uv).x)*q.x*q.y*exp(-r*r*50.)*dec;dec*=.95;}
+ float f=1.-L/.75;return acc*.085*f*f;
+#else
+ return 0.;
+#endif
+}
 vec3 vpos(vec2 uv){float d=texture2D(tDepth,uv).x;vec4 p=projInv*vec4(uv*2.-1.,d*2.-1.,1.);return p.xyz/p.w;}
 float ign(vec2 p){return fract(52.9829189*fract(dot(p,vec2(.06711056,.00583715))));}
-void main(){float d=texture2D(tDepth,vUv).x;if(d>=.99999){gl_FragColor=vec4(1.,1e4,0.,1.);return;}
+void main(){float d=texture2D(tDepth,vUv).x,sh=shafts();if(d>=.99999){gl_FragColor=vec4(1.,1e4,sh,1.);return;}
   vec3 P=vpos(vUv);vec2 px=1./res;
   vec3 Pr=vpos(vUv+vec2(px.x,0.)),Pl=vpos(vUv-vec2(px.x,0.)),Pu=vpos(vUv+vec2(0.,px.y)),Pd=vpos(vUv-vec2(0.,px.y));
   vec3 dx=abs(Pr.z-P.z)<abs(P.z-Pl.z)?Pr-P:P-Pl,dy=abs(Pu.z-P.z)<abs(P.z-Pd.z)?Pu-P:P-Pd;vec3 N=normalize(cross(dx,dy));
-  float z=-P.z,k=.5*radius/z;if(k*proj[1][1]<1.5*px.y){gl_FragColor=vec4(1.,z,0.,1.);return;}
+  float z=-P.z,k=.5*radius/z;if(k*proj[1][1]<1.5*px.y){gl_FragColor=vec4(1.,z,sh,1.);return;}
   float a0=ign(gl_FragCoord.xy)*6.2831853,r2=radius*radius,bias=.025+.0009*z,ao=0.;
   for(int i=0;i<SAMPLES;i++){float t=(float(i)+.5)/float(SAMPLES);float a=a0+float(i)*2.3999632;
     vec2 o=vec2(cos(a)*proj[0][0],sin(a)*proj[1][1])*(k*t);vec3 v=vpos(vUv+o)-P;float vv=dot(v,v),vn=dot(v,N);
     float f=max(r2-vv,0.);ao+=f*f*f*max((vn-bias)/(vv+.04),0.);}
   ao=clamp(1.-ao*intensity*5./(r2*r2*r2*float(SAMPLES)),0.,1.);ao=mix(ao,1.,smoothstep(fadeFar*.55,fadeFar,z));
-  gl_FragColor=vec4(ao,z,0.,1.);}`;
+  gl_FragColor=vec4(ao,z,sh,1.);}`;
 const AO_BLUR=`uniform sampler2D tAO;uniform vec2 res;varying vec2 vUv;
-void main(){vec2 px=1./res;float z=texture2D(tAO,vUv).g,s=0.,w=0.;
-  for(int x=-2;x<2;x++)for(int y=-2;y<2;y++){vec4 t=texture2D(tAO,vUv+(vec2(float(x),float(y))+.5)*px);float wt=1./(1.+abs(t.g-z)*6./max(z,1.));s+=t.r*wt;w+=wt;}
-  gl_FragColor=vec4(s/w,z,0.,1.);}`;
-const AO_COMP=`uniform sampler2D tDiffuse,tAO;uniform float strength;varying vec2 vUv;
-void main(){vec4 c=texture2D(tDiffuse,vUv);float a=texture2D(tAO,vUv).r,l=dot(c.rgb,vec3(.3,.59,.11));a=mix(1.,a,strength*(1.-smoothstep(1.2,4.,l)));gl_FragColor=vec4(c.rgb*a,c.a);}`;
-class FastAOPass extends (THREE.Pass||Object){constructor(samples,full){super();this.needsSwap=true;this.full=!!full;
+void main(){vec2 px=1./res;float z=texture2D(tAO,vUv).g,s=0.,w=0.,b=0.;
+  for(int x=-2;x<2;x++)for(int y=-2;y<2;y++){vec4 t=texture2D(tAO,vUv+(vec2(float(x),float(y))+.5)*px);float wt=1./(1.+abs(t.g-z)*6./max(z,1.));s+=t.r*wt;w+=wt;b+=t.b;}
+  gl_FragColor=vec4(s/w,z,b/16.,1.);}`;
+const AO_COMP=`uniform sampler2D tDiffuse,tAO;uniform float strength,shaftK;uniform vec3 sunCol;varying vec2 vUv;
+void main(){vec4 c=texture2D(tDiffuse,vUv);vec4 T=texture2D(tAO,vUv);float a=T.r,l=dot(c.rgb,vec3(.3,.59,.11));a=mix(1.,a,strength*(1.-smoothstep(1.2,4.,l)));gl_FragColor=vec4(c.rgb*a+sunCol*(T.b*shaftK),c.a);}`;
+class FastAOPass extends (THREE.Pass||Object){constructor(samples,full,shafts){super();this.needsSwap=true;this.full=!!full;this.shafts=!!shafts;
   const rt=()=>new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});this.aoRT=rt();this.blurRT=rt();
-  this.aoMat=new THREE.ShaderMaterial({defines:{SAMPLES:samples||10},uniforms:{tDepth:{value:null},projInv:{value:new THREE.Matrix4()},proj:{value:new THREE.Matrix4()},res:{value:new THREE.Vector2(1,1)},radius:{value:1.25},intensity:{value:1.35},fadeFar:{value:150}},vertexShader:AO_VS,fragmentShader:AO_FS,depthTest:false,depthWrite:false});
+  this.aoMat=new THREE.ShaderMaterial({defines:shafts?{SAMPLES:samples||10,SHAFTS:1}:{SAMPLES:samples||10},uniforms:{sunUV:{value:new THREE.Vector2(.5,.5)},shaftK:{value:0},tDepth:{value:null},projInv:{value:new THREE.Matrix4()},proj:{value:new THREE.Matrix4()},res:{value:new THREE.Vector2(1,1)},radius:{value:1.25},intensity:{value:1.35},fadeFar:{value:150}},vertexShader:AO_VS,fragmentShader:AO_FS,depthTest:false,depthWrite:false});
   this.blurMat=new THREE.ShaderMaterial({uniforms:{tAO:{value:null},res:{value:new THREE.Vector2(1,1)}},vertexShader:AO_VS,fragmentShader:AO_BLUR,depthTest:false,depthWrite:false});
-  this.compMat=new THREE.ShaderMaterial({uniforms:{tDiffuse:{value:null},tAO:{value:null},strength:{value:.78}},vertexShader:AO_VS,fragmentShader:AO_COMP,depthTest:false,depthWrite:false});
+  this.compMat=new THREE.ShaderMaterial({uniforms:{tDiffuse:{value:null},tAO:{value:null},strength:{value:.78},shaftK:{value:0},sunCol:{value:new THREE.Color()}},vertexShader:AO_VS,fragmentShader:AO_COMP,depthTest:false,depthWrite:false});
   this.fsq=new THREE.FullScreenQuad(this.aoMat);}
   setSize(w,h){const W=Math.max(1,this.full?w:w>>1),H=Math.max(1,this.full?h:h>>1);this.aoRT.setSize(W,H);this.blurRT.setSize(W,H);this.aoMat.uniforms.res.value.set(W,H);this.blurMat.uniforms.res.value.set(W,H);}
   render(renderer,writeBuffer,readBuffer){const u=this.aoMat.uniforms;u.tDepth.value=readBuffer.depthTexture;u.proj.value.copy(camera.projectionMatrix);u.projInv.value.copy(camera.projectionMatrixInverse);
@@ -2824,7 +2862,7 @@ function finishInit(){
   for(let i=0;i<18;i++)spawnTraffic();spawnCivPeds(30);
   $('play').disabled=false;
   $('load').textContent=MODELS.ready?'Ville prête · modèles 3D chargés.':'Ville prête (modèles 3D indisponibles hors connexion : version simplifiée).';
-  window.__cam=v=>{camPitch=v;};window.__dbg=()=>JSON.stringify({pitch:camPitch.toFixed(2),recoil:recoil.toFixed(2),pos:[player.pos.x.toFixed(1),player.pos.y.toFixed(2),player.pos.z.toFixed(1)],car:player.car?[player.car.pos.x.toFixed(1),player.car.y.toFixed(2),player.car.pos.z.toFixed(1)]:null,cam:[camera.position.x.toFixed(1),camera.position.y.toFixed(1),camera.position.z.toFixed(1)]});window.__camYaw=v=>{camYaw=v;};window.__dbgSet=(k,v)=>{if(k==='msaa'&&composer){composer.renderTarget1.samples=v;composer.renderTarget2.samples=v;composer.renderTarget1.dispose();composer.renderTarget2.dispose();}if(k==='shadow'){sun.shadow.mapSize.set(v,v);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}}if(k==='trees')treeIM.forEach(a=>a.forEach(im=>im.visible=!!v));if(k==='bloom'&&bloomPass)bloomPass.enabled=!!v;if(k==='shadows')renderer.shadowMap.enabled=!!v;if(k==='pr'){renderer.setPixelRatio(v);resize();}};window.__palmera={cityEnvStep,WEAPONS,get env(){return env;},setRealism,CITYENV,OPTICS,MOD_FOR,PAINTS,wmod,modOn,zoomOf,magOf,modChanged,gunAnchors,LASER,gunLight,retOf,modItems,shopItems,MAXQ,maxTick,maxApply,maxSteps,setFps,FPS,TEXS,ANISO_MAX,pickups,giveWeapon,stripWeapons,LIFE2,SHOPUI,openShop,closeShop,saveGame,loadGame,repairCar,repaintCar,breakWheel,LAMPS,ROLLW,startDelivery,HZ,tryInteract,nm:()=>nightMats,DRV,SEAT,seatFor,releaseDriver,assignDriver,CARL,WINU,STR,AMB,getPost:()=>({composer,ssao:ssaoPass,grade:gradePass}),colliders,dentCar,dentMesh,seatPed,GOV,govApply,LIFE,BOOST,DENTQ,updateDents,lifeUpdate,phonePose,noteLook,capturePortrait,currentLook,updateSuspectCard,breakGlass,breakLights,burstTyre,engOf,spawnDebris,HYD,DEB,FPS,PORT,zoneOf,cycleAccessories,ACC_CFG,radarSees,damageCar,updateCarPhysics,SHOP,policeEnRoute,updateAccessories,renderer,scene,camera,setWeather,WX,TL,isWater,placeBoat,onIsland,hitPed,explosion,get ssao(){return !!ssaoPass;},get post(){return !!composer;},setRealism,ragdolls,get RL(){return RL;},skidMesh,env,spawnPed,colliders,makeCarReal,addRider,dogs,makeCar,makeDog,makeHuman,treeIM,spawnRoadblock,crime,policeUnits,hurtPlayer,endGame,get state(){return state;},perf,roadblocks,openMap,get waypoint(){return waypoint;},player,wanted,cars,peds,helis,setLevel,startGame,MODELS,ball,get fps(){return frame;}};
+  window.__cam=v=>{camPitch=v;};window.__dbg=()=>JSON.stringify({pitch:camPitch.toFixed(2),recoil:recoil.toFixed(2),pos:[player.pos.x.toFixed(1),player.pos.y.toFixed(2),player.pos.z.toFixed(1)],car:player.car?[player.car.pos.x.toFixed(1),player.car.y.toFixed(2),player.car.pos.z.toFixed(1)]:null,cam:[camera.position.x.toFixed(1),camera.position.y.toFixed(1),camera.position.z.toFixed(1)]});window.__camYaw=v=>{camYaw=v;};window.__dbgSet=(k,v)=>{if(k==='msaa'&&composer){composer.renderTarget1.samples=v;composer.renderTarget2.samples=v;composer.renderTarget1.dispose();composer.renderTarget2.dispose();}if(k==='shadow'){sun.shadow.mapSize.set(v,v);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}}if(k==='trees')treeIM.forEach(a=>a.forEach(im=>im.visible=!!v));if(k==='bloom'&&bloomPass)bloomPass.enabled=!!v;if(k==='shadows')renderer.shadowMap.enabled=!!v;if(k==='pr'){renderer.setPixelRatio(v);resize();}};window.__palmera={pedVariety,headLook,get gradePass(){return gradePass;},get ssaoPass(){return ssaoPass;},skyU,cityEnvStep,WEAPONS,get env(){return env;},setRealism,CITYENV,OPTICS,MOD_FOR,PAINTS,wmod,modOn,zoomOf,magOf,modChanged,gunAnchors,LASER,gunLight,retOf,modItems,shopItems,MAXQ,maxTick,maxApply,maxSteps,setFps,FPS,TEXS,ANISO_MAX,pickups,giveWeapon,stripWeapons,LIFE2,SHOPUI,openShop,closeShop,saveGame,loadGame,repairCar,repaintCar,breakWheel,LAMPS,ROLLW,startDelivery,HZ,tryInteract,nm:()=>nightMats,DRV,SEAT,seatFor,releaseDriver,assignDriver,CARL,WINU,STR,AMB,getPost:()=>({composer,ssao:ssaoPass,grade:gradePass}),colliders,dentCar,dentMesh,seatPed,GOV,govApply,LIFE,BOOST,DENTQ,updateDents,lifeUpdate,phonePose,noteLook,capturePortrait,currentLook,updateSuspectCard,breakGlass,breakLights,burstTyre,engOf,spawnDebris,HYD,DEB,FPS,PORT,zoneOf,cycleAccessories,ACC_CFG,radarSees,damageCar,updateCarPhysics,SHOP,policeEnRoute,updateAccessories,renderer,scene,camera,setWeather,WX,TL,isWater,placeBoat,onIsland,hitPed,explosion,get ssao(){return !!ssaoPass;},get post(){return !!composer;},setRealism,ragdolls,get RL(){return RL;},skidMesh,env,spawnPed,colliders,makeCarReal,addRider,dogs,makeCar,makeDog,makeHuman,treeIM,spawnRoadblock,crime,policeUnits,hurtPlayer,endGame,get state(){return state;},perf,roadblocks,openMap,get waypoint(){return waypoint;},player,wanted,cars,peds,helis,setLevel,startGame,MODELS,ball,get fps(){return frame;}};
 }
 try{init();}catch(e){$('load').textContent='Erreur au chargement : '+e.message;console.error(e);}
 
