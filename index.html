@@ -2735,7 +2735,7 @@ const INT_PAL={food:[0xf3e3c7,0x8a5a3b,0xc0392b],market:[0xeef2f0,0x2f6f9f,0x27a
   optic:[0xe8edf2,0x4a5a6a,0x2a7ab8],guns:[0x5b5348,0x3a3026,0xb03a2e],bank:[0xe6e1d6,0x6a5a40,0xc8a24a],barber:[0xf1ece4,0x2c2c2c,0x2a6fd6],
   flowers:[0xf4efe6,0x7a5a3a,0xe25a8a],cinema:[0x2a1f3a,0x1c1426,0xffc84a],home:[0xece6dc,0x8a6a4a,0x3a6ea5],other:[0xebe7e0,0x7a6a5a,0x3a7ab8]};
 function intKind(d){return d.home?'home':SHOP_KIND[d.name]||'other';}
-function intCanEnter(d){return intKind(d)!=='garage';}
+function intCanEnter(d){return !window.__noInterior&&intKind(d)!=='garage';}   // __noInterior : tests des anciens menus
 function intTex(kind,w,h,draw){const c=cnv(w,h),g=c.getContext('2d');draw(g,w,h);const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;t.anisotropy=ANISO_CUR;return t;}
 function floorTex(k){const wood=['home','clothes','optic','barber','flowers'].includes(k),conc=k==='guns'||k==='cinema';
   const t=intTex(k,256,256,(g,w,h)=>{if(wood){for(let i=0;i<8;i++){g.fillStyle=`hsl(28,${35+i%3*6}%,${34+(i*7)%12}%)`;g.fillRect(0,i*32,w,32);g.fillStyle='rgba(0,0,0,.25)';g.fillRect(0,i*32,w,2);g.fillRect((i*97)%w,i*32,2,32);}}
